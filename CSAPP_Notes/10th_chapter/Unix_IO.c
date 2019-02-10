@@ -144,6 +144,13 @@ ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 
 #endif
 
+/*一些关于Unix IO的思考
+ *
+ * read：
+ * 在调用read系统调用时，操作系统会挂起用户进程，并在内存中划定一个区域作为read buffer，然后
+ * 外部IO设备通过DMA的方式将数据传送到特定的内存区域，完成之后给CPU一个中断信号，操作系统就把
+ * 用户进程唤醒，进行读取数据
+ */
 
 
 
