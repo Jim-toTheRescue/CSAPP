@@ -7,6 +7,7 @@ environ, which will be a string array in this simple implemtation.
 */
 
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <iostream>
@@ -25,30 +26,51 @@ using std::cout;
 using std::endl;
 using std::string;
 using std::vector;
+using std::getline;
 
+pid_t cpid = 0;
+
+void sigint_handler(int signum);
 void printAnchor();
-void split(string s, vector<string> &svec, char sep);
-void runcmd(const vector<string>& argv, char* envp[]);
+int split(string s, vector<string> &svec, char sep);
+int runcmd(const vector<string>& argv, char* envp[]);
 bool builtin_cmd(const vector<string> &arg);
 void ls();
 void cd(string dir);
 int main(int argc, char* argv[], char* envp[])
 {
-	string cmd;
-	pid_t pid;
+	string cmd, word;
+	//pid_t pid;
+	int status;
+	if (signal(SIGINT, sigint_handler) == SIG_ERR){
+		cerr << "signal handler setup error" << endl;
+		exit(1);
+	}
 	
 	while (true){
 		vector<string> arg;	
 		printAnchor();		
 		getline(cin, cmd);
-		//cout << "Debug: " << cmd << endl;
-		split(cmd, arg, ' ');
+		//cout << "Debug: " << cmd.size() << endl;
+		status = split(cmd, arg, ' ');
+		if (status == -1) {			
+			continue;
+		}
 		//cout << "Debug: " << arg[0] << endl;
 		if (!builtin_cmd(arg)){
-			if ((pid = fork()) == 0){
-				runcmd(arg, envp);			
+			bool background = arg[arg.size()-1].find('&') != std::string::npos;
+			if (background) {arg.pop_back(); cout << "background = true" << endl;}
+			if ((cpid = fork()) == 0){//-------------------------------------->breakpoint1
+				for (const auto& each: arg) cout << each << endl;
+				status = runcmd(arg, envp);
+				if (status == -1)
+					cout << "execve error: "<< strerror(errno) << endl;
+				exit(1);			
 			}
-			wait(NULL);	
+			if (!background)  //------------------------------------------> breakpoint2
+				while(wait(NULL) <= 0) {}	
+			else
+				cout << cpid << " " << cmd << endl;
 		} 	
 	}
 	return 0;
@@ -71,9 +93,10 @@ void printAnchor()
 	}
 	//cout << "Debug2" << endl;
 	printf("[%s@%s %s]%s ", username.c_str(), hostname.c_str(), dirname.c_str(), usersign.c_str());
+	return;
 }
 
-void runcmd(const vector<string> &argv, char* envp[])
+int runcmd(const vector<string> &argv, char* envp[])
 {
 	vector<string> path;
 	string target;
@@ -90,6 +113,7 @@ void runcmd(const vector<string> &argv, char* envp[])
 	if (argv[0][0] == '.'){
 		target = argv[0].substr(1);
 		target = getenv("PWD") + target;
+		//for (auto each: argv) cout << each << endl;
 		strncpy(c_argv[0], target.c_str(), 256);	
 		status = execve(target.c_str(), c_argv, envp);
 	} else {
@@ -102,30 +126,36 @@ void runcmd(const vector<string> &argv, char* envp[])
 			status = execve(target.c_str(), c_argv, envp);
 		}
 	}
-	if (status == -1){
-		cout << "execve error: "<< strerror(errno) << endl;
-		exit(1);
-	} 
+	return status;
 }
 
-void split(string s, vector<string>& argv, char sep = ' ')
+int split(string s, vector<string>& argv, char sep = ' ')
 {
+	if (s.empty()) return -1;
 	string each;
 	size_t i = 0;
 	while(s[i] == ' '){
 		i++;
 	}
+	if (i == s.size())
+		return -1;
 	s = s.substr(i);
 	for (i=0; i<s.size(); ++i){
-		if (s[i] != sep)
+		if (s[i] != sep && s[i] != '&')
 			each += s[i];
+		else if (s[i] == '&'){
+			if (!each.empty()) argv.push_back(each); 
+			argv.push_back("&");
+			return 0;
+		}
 		else {
 			argv.push_back(each);
 			each = "";
 		}	
 	}
-	if (!each.empty() && each != " ")
+	if (!each.empty())
 		argv.push_back(each);
+	return 0;
 }	
 
 bool builtin_cmd(const vector<string> &arg)
@@ -205,10 +235,51 @@ void cd(string dir)
 	}
 }
 
+void sigint_handler(int signum)
+{
+	if (cpid != 0){
+		kill(cpid, 9);
+		cpid = 0;
+		cout << endl;	
+	}
+	return;
+}
 /*
-To be improved:
-working just fine in the gnome-tty
-but when working in the tty, line61 fail to getenv;
+[yangjunfeng@yang 8th_chapter]$$ ps -a
+ps
+-a
+  PID TTY          TIME CMD
+ 4730 pts/1    00:00:40 gedit
+ 7089 pts/0    00:00:00 tsh
+ 7091 pts/0    00:06:09 hello
+ 7288 pts/0    00:00:00 ps
+[yangjunfeng@yang 8th_chapter]$$ pwd
+/home/yangjunfeng/LinuxEnd/CSAPP/Github/CSAPP_Notes/8th_chapter
+[yangjunfeng@yang 8th_chapter]$$ ps -a
+ps
+-a
+execve error: No such file or directory
+[yangjunfeng@yang 8th_chapter]$$ 
+[yangjunfeng@yang 8th_chapter]$$ ps -a
+ps
+-a
+  PID TTY          TIME CMD
+ 4730 pts/1    00:00:40 gedit
+ 7089 pts/0    00:00:00 tsh
+ 7091 pts/0    00:06:35 hello
+ 7301 pts/0    00:00:00 ps
+[yangjunfeng@yang 8th_chapter]$$ 
+*/
+/*
+在运行了builtin_cmd之后，无法运行外部可执行程序，之后按下一次回车之后才可以。
 */
 	
+
+/*程序目前存在多进程竞争冒险问题*/
+/*
+标注为breakpoint的两句语句存在竞争，在fork出一个子进程之后，系统有可能运行child进程也有可能运行parent进程
+
+
+*/
+
 
