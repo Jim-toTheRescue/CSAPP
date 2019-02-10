@@ -7,13 +7,13 @@
 #include <sys/types.h>
 
 
-#define BUFSIZE 104857600 //100M
+#define BUFSIZE 10485760 //10M
 char fileBuf[BUFSIZE];
 size_t fbsz = -1;
 
 size_t buf2f(const char filename[], char buf[], size_t sz);
 int run(const char* port);//return file discriptor
-void recvpic(int fd);
+size_t recvpic(int fd);
 int recvsz(int connfd);
 
 int main(int argc, char *argv[])
@@ -26,12 +26,14 @@ int main(int argc, char *argv[])
 	listenfd = run(argv[1]);
 	struct sockaddr_in client;
 	char hostname[50], port[20];
+	size_t filesize, rsz = 0;
 	
 	if (listenfd < 0){
         	fprintf(stderr, "Error: %s\n", "Fail to run server...");
         	return -1;
     	}
 	while (1){
+		filesize = 0;
 		connfd = accept(listenfd, (struct sockaddr*)&client, &len);
       	if (connfd == -1){
       	      fprintf(stderr, "Error: %s\n", "Fail to accept clients...");
@@ -43,13 +45,18 @@ int main(int argc, char *argv[])
         	if (status == 0){
             	printf("\nRequest from:\n %s:%s\n", hostname, port);
         	}
-		status = recvsz(connfd);
+
+		while((status = recvsz(connfd)) != -1 && fbsz != -1){
+	/*
 		if (status == -1) {
 			close(connfd);
 			continue;
 		}
-		recvpic(connfd);
-		close(connfd);
+	*/
+			rsz = recvpic(connfd);
+			filesize += rsz;
+		}
+		printf("receive total %d bytes from peer\n", filesize);
 	}
 }
 
@@ -69,13 +76,13 @@ int recvsz(int connfd)
         }	
 }
 
-void recvpic(int connfd)
+size_t recvpic(int connfd)
 {
 	int status = 0;
 	size_t wsz, rsz=0;
 	char* pbuf = fileBuf;
 	while(rsz < fbsz){
-		status = read(connfd, pbuf+rsz, BUFSIZE);
+		status = read(connfd, pbuf+rsz, fbsz-rsz);
 		rsz += status;
      		if (status == 0){//connection broken by peer, EOF
             	printf("connection discarded by peer\n");
@@ -86,17 +93,17 @@ void recvpic(int connfd)
             	fprintf(stderr, "broken connection\n");    
             	exit(1);
         	}
-		printf("status = %d\n", status);
+		//printf("status = %d\n", status);
 	}
-	printf("receive %d bytes from peer\n", rsz);
+	//printf("receive %d bytes from peer\n", rsz);
 	wsz = buf2f("test.pdf", fileBuf, rsz);
 	if (wsz == -1){
 		fprintf(stderr, "Fail to save...\n");
-		return;
+		return -1;
 	} else {
 		printf("Save %d bytes to test.pdf\n", wsz);
 	}
-	return;	
+	return wsz;	
 }
 
 
@@ -104,7 +111,7 @@ void recvpic(int connfd)
 
 size_t buf2f(const char filename[], char buf[], size_t sz)
 {
-	FILE* fp = fopen(filename, "wb");
+	FILE* fp = fopen(filename, "ab");
 	if (!fp){
 		fprintf(stderr, "Fail to open %s\n", filename);
 		return -1;	

@@ -19,7 +19,7 @@ Usage:
 #define BUFSIZE 10485760 //10M
 char fileBuf[BUFSIZE];
 size_t fbsz = -1;	
-size_t f2buf(char filename[], char buf[]);
+size_t f2buf(FILE* fp, char buf[], size_t bufsize);
 ssize_t sendpic(int sockfd);
 int request(const char* host, const char* port);
 ssize_t sendsz(int sockfd);
@@ -34,7 +34,7 @@ int main(int argc, char* argv[])
 	char cmd[MAX_CMD_LEN];
 	ssize_t wsz;
 	size_t len;
-	char filename[MAX_CMD_LEN];
+	FILE* fp = NULL;
 	
 	sockfd = request(argv[1], argv[2]);
 	if (sockfd < 0){
@@ -46,20 +46,23 @@ int main(int argc, char* argv[])
 		if (cmd[len-1] == '\n') cmd[len-1] = '\0';
 
 		if (!strcmp(cmd, "send")){ // cmd == "send", send the fileBuf to peer
-			if (fbsz == -1){
+			if (!fp){
 				fprintf(stderr, "key in the filename first\n");
-				return 0;
+				continue;
 			}
+			while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
+				sendsz(sockfd);
+				wsz = sendpic(sockfd);
+			}
+			fbsz = -1;//Finish sending, send fbsz = -1 to inform peer.
 			sendsz(sockfd);
-			wsz = sendpic(sockfd);
-			if (wsz == 0) continue;
+			fclose(fp);
 		}
 		else {//cmd != "send", consider it a filename
-			fbsz = f2buf(cmd, fileBuf);
-			if (fbsz == -1){
-				fprintf(stderr, "Fail to read %s\n", cmd);
-				exit(1);
-			}			
+			fp = fopen(cmd, "rb");
+			if (!fp){
+				fprintf(stderr, "Fail to open %s\n", cmd);		
+			}
 		}	
 	}
 	return 0;
@@ -93,23 +96,19 @@ ssize_t sendpic(int sockfd)
 	return wsz;			
 }
 
-size_t f2buf(char filename[], char buf[])
+size_t f2buf(FILE* fp, char buf[], size_t bufsize)
 {
-	FILE* fp = fopen(filename, "rb");
-	if (!fp){
-		fprintf(stderr, "Fail to open %s\n", filename);
-		return -1;		
-	}
 	size_t n = 0, sz = 0;
 	char* pbuf = buf;
 	while((n = fread(pbuf, 1, 1024, fp)) > 0){
 		pbuf += n;
 		sz += n;
+		if (sz > bufsize - 1024)
+			break;
 	}
 	if (ferror(fp)){
 		sz = -1;
 	}
-	fclose(fp);
 	return sz;	 
 }
 
