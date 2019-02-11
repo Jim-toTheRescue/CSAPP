@@ -15,85 +15,73 @@ Usage:
 #include <sys/types.h> //getaddrinfo ...
 #include <stdlib.h>
 
-#define MAX_CMD_LEN 128
+#define MAX_FILENAME_LEN 128
 #define BUFSIZE 10485760 //10M
 char fileBuf[BUFSIZE];
-size_t fbsz = -1;	
+size_t fbsz = 0;	
 size_t f2buf(FILE* fp, char buf[], size_t bufsize);
-ssize_t sendpic(int sockfd);
 int request(const char* host, const char* port);
-ssize_t sendsz(int sockfd);
+ssize_t fsend(int sockfd, char* buf, size_t sz);
 
 int main(int argc, char* argv[])
 {
-	if (argc != 3){
+	if (argc 	!= 3){
 		fprintf(stderr, "Usage: %s host port\n", argv[0]);
 		return -1;
 	}
 	int sockfd;
-	char cmd[MAX_CMD_LEN];
-	ssize_t wsz;
+	char filename[MAX_FILENAME_LEN];
+	ssize_t wsz, total = 0;
 	size_t len;
 	FILE* fp = NULL;
-	
+
 	sockfd = request(argv[1], argv[2]);
 	if (sockfd < 0){
 		fprintf(stderr, "Fail to connect %s:%s\n", argv[1], argv[2]);
 		return -1;
 	}
-	while(fgets(cmd, sizeof(cmd)-1, stdin) != NULL){
-		len = strlen(cmd);		
-		if (cmd[len-1] == '\n') cmd[len-1] = '\0';
-
-		if (!strcmp(cmd, "send")){ // cmd == "send", send the fileBuf to peer
-			if (!fp){
-				fprintf(stderr, "key in the filename first\n");
-				continue;
-			}
-			while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
-				sendsz(sockfd);
-				wsz = sendpic(sockfd);
-			}
-			fbsz = -1;//Finish sending, send fbsz = -1 to inform peer.
-			sendsz(sockfd);
-			fclose(fp);
+	
+	while(fgets(filename, sizeof(filename)-1, stdin) != NULL){
+		len = strlen(filename);
+		if (filename[len-1] == '\n') filename[len-1] = '\0';
+		fp = fopen(filename, "rb");
+		if (!fp){
+			fprintf(stderr, "Fail to open %s\n", filename);
+			continue;
 		}
-		else {//cmd != "send", consider it a filename
-			fp = fopen(cmd, "rb");
-			if (!fp){
-				fprintf(stderr, "Fail to open %s\n", cmd);		
-			}
-		}	
+		len += 1;//count the '\0'
+		fsend(sockfd, (char*)&len, sizeof(len));//send filename length
+		fsend(sockfd, filename, len); // send filename and '\0'
+		while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
+			printf("%u\n", fbsz);
+			fsend(sockfd, (char*)&fbsz, sizeof(fbsz));//send file chunk length
+			wsz = fsend(sockfd, fileBuf, fbsz); // send file chunk
+			printf("%d bytes sent\n", wsz);
+			total += wsz;
+		}
+		fbsz = 0; // send end flag
+		printf("Done, send total %ld bytes to peer\n", total);
+		fsend(sockfd,(char*)&fbsz, sizeof(fbsz));
+		fclose(fp);
 	}
 	return 0;
 }
 
-//to tell peer the size of the following message
-ssize_t sendsz(sockfd)
+/*
+ * fd : file descriptor
+ * buf: memory buffer with infomation to be sent to the socket
+ * sz: the size to send, should be less than BUFSIZE;
+ */
+ssize_t fsend(int sockfd, char* buf, size_t sz)
 {
-	ssize_t sz;
+	ssize_t wsz;//write size
 
-	sz = write(sockfd, &fbsz, sizeof(fbsz));
-	if (sz < 0){
-		fprintf(stderr, "Fail to send size...\n");
+	wsz = write(sockfd, buf, sz);
+	if (wsz == -1){
+		fprintf(stderr, "Fail to send data\n");
 		exit(1);
 	}
-	return sz;
-}
-
-ssize_t sendpic(int sockfd)
-{
-	ssize_t wsz;
-
-	wsz = write(sockfd, fileBuf, fbsz);
-	fbsz = -1;
-	if (wsz == -1){
-		fprintf(stderr, "Fail to send data...\n");
-		exit(1);			
-	} else {
-		printf("Send %d bytes to peer\n", wsz);
-	}
-	return wsz;			
+	return wsz;
 }
 
 size_t f2buf(FILE* fp, char buf[], size_t bufsize)
@@ -149,3 +137,11 @@ int request(const char* host, const char* port)
 	}
 	return sockfd;
 }
+
+/*
+使用全局变量导致函数的接口很不统一，也使得函数的的用途过于单一，
+比如sendpic只能用于发送fileBuf缓冲区，应该修改接口使其更加通用。
+
+可以把发送和接受都抽象成单一函数，发送格式为：
+message length + message body
+*/
