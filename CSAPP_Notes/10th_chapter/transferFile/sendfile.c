@@ -25,7 +25,7 @@ ssize_t fsend(int sockfd, char* buf, size_t sz);
 
 int main(int argc, char* argv[])
 {
-	if (argc 	!= 3){
+	if (argc != 3){
 		fprintf(stderr, "Usage: %s host port\n", argv[0]);
 		return -1;
 	}
