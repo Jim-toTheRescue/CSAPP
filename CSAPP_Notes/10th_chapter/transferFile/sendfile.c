@@ -19,12 +19,14 @@ Usage:
 #define MAX_FILENAME_LEN 128
 #define BUFSIZE 10485760 //10M
 char fileBuf[BUFSIZE];
-size_t fbsz = 0;	
+//the size of data to be sent in the fileBuf, supposedly it should be BUFSIZE or close to BUFSIZE
+size_t fbsz = 0;
 size_t f2buf(FILE* fp, char buf[], size_t bufsize);
 int request(const char* host, const char* port);
-ssize_t fsend(int sockfd, char* buf, size_t sz);
+ssize_t fsend(int sockfd, const char* buf, size_t sz);
 size_t fsize(const char* filename);
 void printProc(double cur, double total);
+int fsendTo(int sockfd, const char filename[], const char remoteName[]);
 
 int main(int argc, char* argv[])
 {
@@ -32,45 +34,25 @@ int main(int argc, char* argv[])
 		fprintf(stderr, "Usage: %s host port\n", argv[0]);
 		return -1;
 	}
-	int sockfd;
-	char filename[MAX_FILENAME_LEN];
-	ssize_t wsz, total = 0;
-	size_t len, fileSize;
-	FILE* fp = NULL;
-
+	int sockfd, status;
+	char filename[MAX_FILENAME_LEN], remoteName[MAX_FILENAME_LEN];
+	size_t len;
+	
 	sockfd = request(argv[1], argv[2]);
 	if (sockfd < 0){
 		fprintf(stderr, "Fail to connect %s:%s\n", argv[1], argv[2]);
 		return -1;
+	} else {
+		printf("Connected to %s: %s\n", argv[1], argv[2]);
 	}
-	
-	while(fgets(filename, sizeof(filename)-1, stdin) != NULL){
-		if (fileSize == -1){
-			fprintf(stderr, "Fail to get file size of %s\n", filename);
+	while(1){
+		if (fscanf(stdin, "%s %s", filename, remoteName) != 2){
+			printf("Usage: filedir remoteName\n");
 			continue;
 		}
-		len = strlen(filename);
-		if (filename[len-1] == '\n') filename[len-1] = '\0';
-		fileSize = fsize(filename);
-		fp = fopen(filename, "rb");
-		if (!fp){
-			fprintf(stderr, "Fail to open %s\n", filename);
-			continue;
-		}
-		len += 1;//count the '\0'
-		fsend(sockfd, (char*)&len, sizeof(len));//send filename length
-		fsend(sockfd, filename, len); // send filename and '\0'
-		while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
-			fsend(sockfd, (char*)&fbsz, sizeof(fbsz));//send file chunk length
-			wsz = fsend(sockfd, fileBuf, fbsz); // send file chunk
-			total += wsz;
-			printProc(total, fileSize);//show the percentage sent
-			sleep(1);
-		}
-		fbsz = 0; // send end flag
-		printf("\nDone, send total %ld Mbytes to peer\n", total/1024/1024);
-		fsend(sockfd,(char*)&fbsz, sizeof(fbsz));
-		fclose(fp);
+		printf("Saving %s as %s\n", filename, remoteName);
+		status = fsendTo(sockfd, filename, remoteName); //send file with filename to sockfd
+		close(sockfd);
 	}
 	return 0;
 }
@@ -80,7 +62,7 @@ int main(int argc, char* argv[])
  * buf: memory buffer with infomation to be sent to the socket
  * sz: the size to send, should be less than BUFSIZE;
  */
-ssize_t fsend(int sockfd, char* buf, size_t sz)
+ssize_t fsend(int sockfd, const char* buf, size_t sz)
 {
 	ssize_t wsz;//write size
 
@@ -96,10 +78,10 @@ size_t f2buf(FILE* fp, char buf[], size_t bufsize)
 {
 	size_t n = 0, sz = 0;
 	char* pbuf = buf;
-	while((n = fread(pbuf, 1, 1024, fp)) > 0){
+	while((n = fread(pbuf, 1,1024, fp)) > 0){
 		pbuf += n;
 		sz += n;
-		if (sz > bufsize - 1024)
+		if (sz > bufsize-1024)
 			break;
 	}
 	if (ferror(fp)){
@@ -125,6 +107,36 @@ void printProc(double cur, double total)
 	printf("\33[2K\r");
 	printf("进度: %.2lf%%", cur/total * 100);
 	fflush(stdout);
+}
+
+int fsendTo(int sockfd, const char filename[], const char remoteName[])
+{
+	size_t len, fileSize;
+	FILE *fp = NULL;
+	ssize_t wsz, total = 0; //the size of the chunk just sent, the total size already sent
+
+	fileSize = fsize(filename);//user syscall stat to get the size of the file to send
+	if (fileSize == -1){
+		fprintf(stderr, "Fail to get the size of %s\n", filename);
+		return -1;
+	}
+	fp = fopen(filename, "rb"); //open the file to send in binary mode
+	if (!fp){
+			fprintf(stderr, "Fail to open %s\n", filename);
+			return -1;
+	}
+	len = strlen(remoteName) + 1; //remoteName length with '\0'
+	fsend(sockfd, (char*)&len, sizeof(size_t));//send the saving name size
+	fsend(sockfd, remoteName, len); //send the saving name
+	fsend(sockfd, (char*)&fileSize, sizeof(fileSize)); //send the following file size
+	while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
+		wsz = fsend(sockfd, fileBuf, fbsz); // send file chunk
+		total += wsz;
+		printProc(total, fileSize);//show the percentage sent
+	}
+	printf("\nDone, send total %ld bytes to peer\n", total);
+	fclose(fp);
+	return 0;
 }
 
 int request(const char* host, const char* port)
