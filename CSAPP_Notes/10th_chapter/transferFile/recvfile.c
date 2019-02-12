@@ -78,7 +78,6 @@ size_t frecv(int connfd, char* buf, size_t sz)
         	}
 		rsz += status;
 	}	
-	printf("%u\n", rsz);
 	return rsz;
 }	
 
@@ -107,44 +106,44 @@ size_t buf2f(FILE *fp, char buf[], size_t sz)
 
 int run(const char* port)
 {
-    int status, listenfd, optval=1;
-    struct addrinfo hints, *res, *rp;
-    memset(&hints, '\0', sizeof(struct addrinfo));
+	int status, listenfd, optval=1;
+    	struct addrinfo hints, *res, *rp;
+    	memset(&hints, '\0', sizeof(struct addrinfo));
 
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = 0;
-    hints.ai_flags = AI_PASSIVE;
+    	hints.ai_family = AF_INET;
+    	hints.ai_socktype = SOCK_STREAM;
+    	hints.ai_protocol = 0;
+    	hints.ai_flags = AI_PASSIVE;
 
-    status = getaddrinfo(NULL, port, &hints, &res);
-    if (status != 0){
-        fprintf(stderr, "Error: %s\n", "getaddrinf");
-        return -1;
-    }
-    for (rp = res; rp; rp = rp->ai_next){
-        listenfd =socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        //Eliminates "Address already in use" error from bind
-        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
+    	status = getaddrinfo(NULL, port, &hints, &res);
+    	if (status != 0){
+        	fprintf(stderr, "Error: %s\n", "getaddrinf");
+        	return -1;
+     	}
+    	for (rp = res; rp; rp = rp->ai_next){
+        	listenfd =socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        	//Eliminates "Address already in use" error from bind
+        	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
 
-        if (listenfd < 0){
-            continue;
-        }
-        status = bind(listenfd, rp->ai_addr, rp->ai_addrlen);
-        if (status == 0){
-            break;
-        }
-        close(listenfd);
-    }
-    if(!rp){
-        fprintf(stderr, "Error: %s\n", "socket");
-        return -1;
-    }
-    freeaddrinfo(res);
-    status = listen(listenfd, 1024);
-    if (status == 0)
-        return listenfd;
-    else
-        return -1;
+        	if (listenfd < 0)
+            	continue;
+        
+        	status = bind(listenfd, rp->ai_addr, rp->ai_addrlen);
+        	if (status == 0)
+            	break;
+        
+        	close(listenfd);
+    	}
+    	if(!rp){
+        	fprintf(stderr, "Error: %s\n", "socket");
+        	return -1;
+    	}
+    	freeaddrinfo(res);
+    	status = listen(listenfd, 1024);
+    	if (status == 0)
+        	return listenfd;
+    	else
+        	return -1;
 }
 
 

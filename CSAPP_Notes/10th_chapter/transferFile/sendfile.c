@@ -14,6 +14,7 @@ Usage:
 #include <netdb.h> //getaddrinfo
 #include <sys/types.h> //getaddrinfo ...
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #define MAX_FILENAME_LEN 128
 #define BUFSIZE 10485760 //10M
@@ -22,6 +23,8 @@ size_t fbsz = 0;
 size_t f2buf(FILE* fp, char buf[], size_t bufsize);
 int request(const char* host, const char* port);
 ssize_t fsend(int sockfd, char* buf, size_t sz);
+size_t fsize(const char* filename);
+void printProc(double cur, double total);
 
 int main(int argc, char* argv[])
 {
@@ -32,7 +35,7 @@ int main(int argc, char* argv[])
 	int sockfd;
 	char filename[MAX_FILENAME_LEN];
 	ssize_t wsz, total = 0;
-	size_t len;
+	size_t len, fileSize;
 	FILE* fp = NULL;
 
 	sockfd = request(argv[1], argv[2]);
@@ -42,8 +45,13 @@ int main(int argc, char* argv[])
 	}
 	
 	while(fgets(filename, sizeof(filename)-1, stdin) != NULL){
+		if (fileSize == -1){
+			fprintf(stderr, "Fail to get file size of %s\n", filename);
+			continue;
+		}
 		len = strlen(filename);
 		if (filename[len-1] == '\n') filename[len-1] = '\0';
+		fileSize = fsize(filename);
 		fp = fopen(filename, "rb");
 		if (!fp){
 			fprintf(stderr, "Fail to open %s\n", filename);
@@ -53,14 +61,14 @@ int main(int argc, char* argv[])
 		fsend(sockfd, (char*)&len, sizeof(len));//send filename length
 		fsend(sockfd, filename, len); // send filename and '\0'
 		while((fbsz = f2buf(fp, fileBuf, BUFSIZE)) > 0){
-			printf("%u\n", fbsz);
 			fsend(sockfd, (char*)&fbsz, sizeof(fbsz));//send file chunk length
 			wsz = fsend(sockfd, fileBuf, fbsz); // send file chunk
-			printf("%d bytes sent\n", wsz);
 			total += wsz;
+			printProc(total, fileSize);//show the percentage sent
+			sleep(1);
 		}
 		fbsz = 0; // send end flag
-		printf("Done, send total %ld bytes to peer\n", total);
+		printf("\nDone, send total %ld Mbytes to peer\n", total/1024/1024);
 		fsend(sockfd,(char*)&fbsz, sizeof(fbsz));
 		fclose(fp);
 	}
@@ -100,6 +108,24 @@ size_t f2buf(FILE* fp, char buf[], size_t bufsize)
 	return sz;	 
 }
 
+size_t fsize(const char* filename)
+{
+	struct stat info;
+	int status;
+	status = stat(filename, &info);
+	if (status == 0)
+		return info.st_size;
+	else
+		return -1;
+}
+
+//打印进度百分比
+void printProc(double cur, double total)
+{
+	printf("\33[2K\r");
+	printf("进度: %.2lf%%", cur/total * 100);
+	fflush(stdout);
+}
 
 int request(const char* host, const char* port)
 {
